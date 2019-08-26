@@ -68,8 +68,8 @@ void computeC2MC1(const Mat &R1, const Mat &tvec1, const Mat &R2, const Mat &tve
 void homographyFromCameraDisplacement(const string &img1Path, const string &img2Path, const Size &patternSize,
                                       const float squareSize, const string &intrinsicsPath)
 {
-    Mat img1 = imread(img1Path);
-    Mat img2 = imread(img2Path);
+    Mat img1 = imread(img1Path, IMREAD_GRAYSCALE);
+    Mat img2 = imread(img2Path, IMREAD_GRAYSCALE);
 
     //! [compute-poses]
     vector<Point2f> corners1, corners2;
@@ -81,14 +81,27 @@ void homographyFromCameraDisplacement(const string &img1Path, const string &img2
         cout << "Error, cannot find the chessboard corners in both images." << endl;
         return;
     }
+    cornerSubPix(img1, corners1, Size(5, 5), Size(-1, -1),
+                 TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.0001));
+    cornerSubPix(img2, corners2, Size(5, 5), Size(-1, -1),
+                 TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.0001));
 
     vector<Point3f> objectPoints;
     calcChessboardCorners(patternSize, squareSize, objectPoints);
 
     FileStorage fs(intrinsicsPath, FileStorage::READ);
+    if (!fs.isOpened()) {
+        cerr << "Failed to open intrinsic file: " << intrinsicsPath << endl;
+        return;
+    }
     Mat cameraMatrix, distCoeffs;
     fs["camera_matrix"] >> cameraMatrix;
     fs["distortion_coefficients"] >> distCoeffs;
+    fs.release();
+    if (cameraMatrix.empty() || distCoeffs.empty()) {
+        cerr << "Wrong format in intrinsic file: " << intrinsicsPath << endl;
+        return;
+    }
 
     Mat rvec1, tvec1;
     solvePnP(objectPoints, corners1, cameraMatrix, distCoeffs, rvec1, tvec1);
@@ -193,12 +206,18 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    Size patternSize(parser.get<int>("width"), parser.get<int>("height"));
-    float squareSize = (float) parser.get<double>("square_size");
-    homographyFromCameraDisplacement(parser.get<String>("image1"),
-                                     parser.get<String>("image2"),
-                                     patternSize, squareSize,
-                                     parser.get<String>("intrinsics"));
+//    Size patternSize(parser.get<int>("width"), parser.get<int>("height"));
+//    float squareSize = (float) parser.get<double>("square_size");
+//    homographyFromCameraDisplacement(parser.get<String>("image1"),
+//                                     parser.get<String>("image2"),
+//                                     patternSize, squareSize,
+//                                     parser.get<String>("intrinsics"));
+
+
+    string image1 = "/home/vance/dataset/rk/calibration/extrinsic-0819/extrinsic_good/slamimg/frameRaw793276354.jpg";
+    string image2 = "/home/vance/dataset/rk/calibration/extrinsic-0819/extrinsic_good/slamimg/frameRaw793309608.jpg";
+    string intrinsicsPath = "/home/vance/dataset/rk/intrinsic_640x480.yaml";
+    homographyFromCameraDisplacement(image1, image2, Size(11, 8), 0.03, intrinsicsPath);
 
     return 0;
 }

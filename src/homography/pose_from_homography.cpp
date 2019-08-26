@@ -58,7 +58,7 @@ void poseEstimationFromCoplanarPoints(const string &imgPath, const string &intri
 
     if (!found)
     {
-        cout << "Cannot find chessboard corners." << endl;
+        cout << "Cannot find chessboard corners in " << imgPath << endl;
         return;
     }
     g_succ++;
@@ -163,7 +163,7 @@ int main(int argc, char *argv[])
 
     Size patternSize(11, 8);
     float squareSize = 0.03;
-    string intrinsicsPath = "/home/vance/ddu_ws/learnCV/CamConfig.yml";
+    string intrinsicsPath = "/home/vance/dataset/rk/intrinsic_640x480.yaml";
     string imageFolder = "/home/vance/dataset/rk/calibration/extrinsic-0819/extrinsic_good/slamimg";
     vector<string> images = readImageFromFolder(imageFolder);
     for (int i = 0; i < images.size(); ++i)

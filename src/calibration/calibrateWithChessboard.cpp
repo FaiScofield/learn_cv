@@ -207,7 +207,7 @@ int main(int argc, char *argv[])
         cv::imshow("Image", sketch);
         if (found) {
             cornerSubPix(image, corners, Size(5, 5), Size(-1, -1),
-                         TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1));
+                         TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.0001));
             drawChessboardCorners(imageOut, g_boardSize, Mat(corners), found);
             allCorners.push_back(corners);
             cout << "Find " << corners.size() << " corners in image " << i << endl;

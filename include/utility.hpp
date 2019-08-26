@@ -14,6 +14,7 @@
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include <g2o/core/base_unary_edge.h>
 #include <g2o/types/sba/types_six_dof_expmap.h>
@@ -202,6 +203,59 @@ Eigen::Vector3d MatRotation2Eular(const cv::Mat& R)
     return Rotation.eulerAngles(2, 1, 0);
 }
 
+Eigen::Vector3d getAngleAxisFromCvMat(const cv::Mat& T)
+{
+    assert(T.rows == 4 && T.cols == 4);
+    cv::Mat R = T.rowRange(0, 3).colRange(0, 3);
+    cv::Mat rvec;
+    cv::Rodrigues(R, rvec);
+    Eigen::Vector3d angleAxis;
+    cv::cv2eigen(rvec, angleAxis);
+    return angleAxis;
+}
+
+Eigen::Vector3d getTranslationFromCvMat(const cv::Mat& T)
+{
+    assert(T.rows == 4 && T.cols == 4);
+    Eigen::Vector3d t;
+    Mat tt = T.rowRange(0, 3).col(3);
+    cv::cv2eigen(tt, t);
+    return t;
+}
+
+template<typename T>
+Eigen::Matrix<T,4,4> QuaternionMultMatLeft(const Eigen::Quaternion<T>& q)
+{
+    return (Eigen::Matrix<T,4,4>() << q.w(), -q.z(), q.y(), q.x(),
+                                      q.z(), q.w(), -q.x(), q.y(),
+                                      -q.y(), q.x(), q.w(), q.z(),
+                                      -q.x(), -q.y(), -q.z(), q.w()).finished();
+}
+
+template<typename T>
+Eigen::Matrix<T,4,4> QuaternionMultMatRight(const Eigen::Quaternion<T>& q)
+{
+    return (Eigen::Matrix<T,4,4>() << q.w(), q.z(), -q.y(), q.x(),
+                                      -q.z(), q.w(), q.x(), q.y(),
+                                      q.y(), -q.x(), q.w(), q.z(),
+                                      -q.x(), -q.y(), -q.z(), q.w()).finished();
+}
+
+template<typename T>
+void EigenMat2RPY(const Eigen::Matrix<T, 3, 3>& m, T& roll, T& pitch, T& yaw)
+{
+    roll = atan2(m(2,1), m(2,2));
+    pitch = atan2(-m(2,0), sqrt(m(2,1) * m(2,1) + m(2,2) * m(2,2)));
+    yaw = atan2(m(1,0), m(0,0));
+}
+
+template<typename T>
+void EigenMat2RPY(const Eigen::Matrix<T, 4, 4>& m, T& roll, T& pitch, T& yaw)
+{
+    roll = atan2(m(2,1), m(2,2));
+    pitch = atan2(-m(2,0), sqrt(m(2,1) * m(2,1) + m(2,2) * m(2,2)));
+    yaw = atan2(m(1,0), m(0,0));
+}
 
 }  // namespace cvu
 

@@ -11,3 +11,14 @@ target_link_libraries(pose_from_homography
     ${OpenCV_LIBS}
     learnCV
 )
+
+
+add_executable(perspective_correction perspective_correction.cpp)
+target_link_libraries(perspective_correction
+    ${OpenCV_LIBS}
+)
+
+add_executable(homography_from_camera_displacement homography_from_camera_displacement.cpp)
+target_link_libraries(homography_from_camera_displacement
+    ${OpenCV_LIBS}
+)

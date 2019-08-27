@@ -9,18 +9,18 @@
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/calib3d.hpp>
 
 #include <g2o/core/base_unary_edge.h>
 #include <g2o/types/sba/types_six_dof_expmap.h>
 
-#include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/filesystem.hpp>
 
 struct OdomRaw {
     long long int timestamp;
@@ -41,11 +41,7 @@ struct OdomRaw {
         float c = cos(theta);
         float s = sin(theta);
 
-        return (cv::Mat_<float>(4,4) <<
-                c,-s, 0, x,
-                s, c, 0, y,
-                0, 0, 1, 0,
-                0, 0, 0, 1);
+        return (cv::Mat_<float>(4, 4) << c, -s, 0, x, s, c, 0, y, 0, 0, 1, 0, 0, 0, 0, 1);
     }
 };
 
@@ -161,13 +157,13 @@ Point3f se3map(const Mat& _Tcw, const Point3f& _pt)
     return (R * _pt + t);
 }
 
-// void normalizeYawAngle(se2lam::Se2 &odom)
-//{
-//    if (odom.theta < -M_PI)
-//        odom.theta += M_PI;
-//    else if (odom.theta > M_PI)
-//        odom.theta -= M_PI;
-//}
+double normalizeAngleRad(double rad)
+{
+    if (rad < -M_PI)
+        rad += 2 * M_PI;
+    else if (rad > M_PI)
+        rad -= 2 * M_PI;
+}
 
 // Gamma变换 gamma = 1.2 越小越亮
 cv::Mat gamma(const cv::Mat& grayImg, float gamma)
@@ -223,38 +219,42 @@ Eigen::Vector3d getTranslationFromCvMat(const cv::Mat& T)
     return t;
 }
 
-template<typename T>
-Eigen::Matrix<T,4,4> QuaternionMultMatLeft(const Eigen::Quaternion<T>& q)
+template <typename T> Eigen::Matrix<T, 4, 4> QuaternionMultMatLeft(const Eigen::Quaternion<T>& q)
 {
-    return (Eigen::Matrix<T,4,4>() << q.w(), -q.z(), q.y(), q.x(),
-                                      q.z(), q.w(), -q.x(), q.y(),
-                                      -q.y(), q.x(), q.w(), q.z(),
-                                      -q.x(), -q.y(), -q.z(), q.w()).finished();
+    return (Eigen::Matrix<T, 4, 4>() << q.w(), -q.z(), q.y(), q.x(), q.z(), q.w(), -q.x(), q.y(),
+            -q.y(), q.x(), q.w(), q.z(), -q.x(), -q.y(), -q.z(), q.w())
+        .finished();
 }
 
-template<typename T>
-Eigen::Matrix<T,4,4> QuaternionMultMatRight(const Eigen::Quaternion<T>& q)
+template <typename T> Eigen::Matrix<T, 4, 4> QuaternionMultMatRight(const Eigen::Quaternion<T>& q)
 {
-    return (Eigen::Matrix<T,4,4>() << q.w(), q.z(), -q.y(), q.x(),
-                                      -q.z(), q.w(), q.x(), q.y(),
-                                      q.y(), -q.x(), q.w(), q.z(),
-                                      -q.x(), -q.y(), -q.z(), q.w()).finished();
+    return (Eigen::Matrix<T, 4, 4>() << q.w(), q.z(), -q.y(), q.x(), -q.z(), q.w(), q.x(), q.y(),
+            q.y(), -q.x(), q.w(), q.z(), -q.x(), -q.y(), -q.z(), q.w())
+        .finished();
 }
 
-template<typename T>
-void EigenMat2RPY(const Eigen::Matrix<T, 3, 3>& m, T& roll, T& pitch, T& yaw)
+template <typename T> void EigenMat2RPY(const Eigen::Matrix<T, 3, 3>& m, T& roll, T& pitch, T& yaw)
 {
-    roll = atan2(m(2,1), m(2,2));
-    pitch = atan2(-m(2,0), sqrt(m(2,1) * m(2,1) + m(2,2) * m(2,2)));
-    yaw = atan2(m(1,0), m(0,0));
+    roll = atan2(m(2, 1), m(2, 2));
+    pitch = atan2(-m(2, 0), sqrt(m(2, 1) * m(2, 1) + m(2, 2) * m(2, 2)));
+    yaw = atan2(m(1, 0), m(0, 0));
 }
 
-template<typename T>
-void EigenMat2RPY(const Eigen::Matrix<T, 4, 4>& m, T& roll, T& pitch, T& yaw)
+template <typename T> void EigenMat2RPY(const Eigen::Matrix<T, 4, 4>& m, T& roll, T& pitch, T& yaw)
 {
-    roll = atan2(m(2,1), m(2,2));
-    pitch = atan2(-m(2,0), sqrt(m(2,1) * m(2,1) + m(2,2) * m(2,2)));
-    yaw = atan2(m(1,0), m(0,0));
+    roll = atan2(m(2, 1), m(2, 2));
+    pitch = atan2(-m(2, 0), sqrt(m(2, 1) * m(2, 1) + m(2, 2) * m(2, 2)));
+    yaw = atan2(m(1, 0), m(0, 0));
+}
+
+
+void spaceToPlane(const Eigen::Vector3d& Pc, Point2f& p, const Eigen::Matrix3d& K)
+{
+    Eigen::Vector3d Pc_normalized = Pc / Pc[2];
+    Eigen::Vector3d Puv = K * Pc_normalized;
+
+    p.x = Puv[0];
+    p.y = Puv[1];
 }
 
 }  // namespace cvu
@@ -298,9 +298,9 @@ Vector2d project2d(const Vector3d& v)
 }
 
 
-//class EdgeSE3ProjectXYZOnlyPose : public BaseUnaryEdge<2, Vector2d, VertexSE3Expmap>
+// class EdgeSE3ProjectXYZOnlyPose : public BaseUnaryEdge<2, Vector2d, VertexSE3Expmap>
 //{
-//public:
+// public:
 //    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
 //    EdgeSE3ProjectXYZOnlyPose() {}

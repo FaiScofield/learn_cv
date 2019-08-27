@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
     ec.estimate(Tbc, scales);
     double roll, pitch, yaw;
     cvu::EigenMat2RPY(Tbc, roll, pitch, yaw);
-    printf("R_cam2odo: %f, %f, %f\n", rad2degree(roll), rad2degree(pitch), rad2degree(yaw));
+    printf("R_cam2odo[degree]: %f, %f, %f\n", rad2degree(roll), rad2degree(pitch), rad2degree(yaw));
 
 //    cout << "Tbc: " << endl << Tbc << endl;
 //    ec.writePose(g_outputFile);

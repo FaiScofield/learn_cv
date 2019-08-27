@@ -32,3 +32,10 @@ target_link_libraries(extrinsicCalibrateBetweenCameraOdom
     ${OpenCV_LIBS}
     ${Boost_LIBRARIES}
     )
+
+add_executable(extrinsicCalibrateSimulation extrinsicCalibrateSimulation.cpp)
+target_link_libraries(extrinsicCalibrateSimulation
+    learnCV
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+    )

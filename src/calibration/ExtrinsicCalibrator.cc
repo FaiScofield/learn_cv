@@ -139,7 +139,7 @@ void ExtrinsicCalibrator::readOdomFromFile(const std::string& odomFile)
     std::string lineData;
     while (std::getline(ifs, lineData) && !lineData.empty()) {
         OdomRaw oraw;
-        std::stringstream ss(lineData);
+        std::stringstream ss(lineData);// lineData = "a  aa asf asf"
         ss >> oraw.timestamp >> oraw.x >> oraw.y >> oraw.theta >> oraw.linearVelX >>
             oraw.AngularVelZ >> oraw.deltaDistance >> oraw.deltaTheta;
         mvOdomRaws.push_back(oraw);

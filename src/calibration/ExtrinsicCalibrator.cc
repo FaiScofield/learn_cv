@@ -22,13 +22,20 @@
 namespace ec
 {
 
+using std::vector;
+using std::string;
+using Eigen::Matrix3d;
+using Eigen::Vector3d;
+using namespace cv;
 
 ExtrinsicCalibrator::ExtrinsicCalibrator()
 {
-    mBoardSize = cv::Size(11, 8);
-    K = (cv::Mat_<double>(3, 3) << 415.3904681732305, 0., 317.2546831363181, 0., 415.6664203685940,
+    mBoardSize = Size(8, 11);  // Size(width, height) 注意这里不能用11x8,要用8x11,根据Matlab而来.
+    mSquareSize = 0.03; // [m]
+
+    K = (Mat_<double>(3, 3) << 415.3904681732305, 0., 317.2546831363181, 0., 415.6664203685940,
          241.0199225105337, 0., 0., 1.);
-    D = (cv::Mat_<double>(5, 1) << 5.3963689585481e-02, -5.3999880307856e-02, 7.248873665656701e-04,
+    D = (Mat_<double>(5, 1) << 5.3963689585481e-02, -5.3999880307856e-02, 7.248873665656701e-04,
          7.696301272230405e-04, 0.0);
 
     fx = K.at<double>(0, 0);
@@ -40,9 +47,10 @@ ExtrinsicCalibrator::ExtrinsicCalibrator()
 ExtrinsicCalibrator::~ExtrinsicCalibrator()
 {
 }
-void ExtrinsicCalibrator::readCornersFromFile(const std::string& cornerFile)
+
+void ExtrinsicCalibrator::readCornersFromFile_Matlab(const std::string& cornerFile)
 {
-    if (nTatalFrames < 1) {
+    if (N < 1) {
         std::cerr << "Please read image data first!" << std::endl;
         return;
     }
@@ -53,8 +61,8 @@ void ExtrinsicCalibrator::readCornersFromFile(const std::string& cornerFile)
         return;
     }
 
-    std::vector<cv::Point2f> tmp(nFeaturesPerFrame);
-    mvvCorners.resize(nTatalFrames, tmp);
+    std::vector<Point2f> tmp(nFeaturesPerFrame);
+    mvvCorners.resize(N, tmp);
 
     int index = -1;
     std::string lineData;
@@ -65,8 +73,8 @@ void ExtrinsicCalibrator::readCornersFromFile(const std::string& cornerFile)
 
         // 确定图像索引index
         if (std::sscanf(lineData.c_str(), "val(:,:,%d) =", &index) == 1) {
-            index -= 1;
-            if (index < 0 || index >= nTatalFrames) {
+            index -= 1;  // Matlab序号从1开始计,这里要减掉1
+            if (index < 0 || index >= N) {
                 std::cerr << "Wrong index in file! : " << index + 1 << std::endl;
                 continue;
             }
@@ -78,20 +86,19 @@ void ExtrinsicCalibrator::readCornersFromFile(const std::string& cornerFile)
         for (int j = 0; j < nFeaturesPerFrame; ++j) {
             std::getline(ifs, pointDate);
             std::stringstream ss(pointDate);
-            cv::Point2f p;
+            Point2f p;
             ss >> p.x >> p.y;
             mvvCorners[index][j] = p;
         }
     }
     ifs.close();
 
-    assert(index == nTatalFrames - 1);
+    assert(index == N - 1);
 
     // generate fixed MapPoint
-    const float squareSize = 0.03;  // unit:  m
-    for (int i = 0; i < 8; i++) {
-        for (int j = 0; j < 11; j++)
-            mvMapPoints.emplace_back(cv::Point3f(float(j * squareSize), float(i * squareSize), 0.));
+    for (int i = 0; i < mBoardSize.height; i++) {
+        for (int j = 0; j < mBoardSize.width; j++)
+            mvMapPoints.emplace_back(Point3f(float(j * mSquareSize), float(i * mSquareSize), 0.));
     }
 }
 
@@ -111,7 +118,7 @@ void ExtrinsicCalibrator::readImageFromFile(const std::string& imageFile)
         long long int timestamp = atoll(lineData.substr(i + 1, j - i - 1).c_str());
         mvImageRaws.push_back(ImageRaw(lineData, timestamp));
         mvTimeImage.push_back(timestamp);
-        cv::Mat img = cv::imread(lineData, CV_LOAD_IMAGE_GRAYSCALE);
+        Mat img = imread(lineData, CV_LOAD_IMAGE_GRAYSCALE);
         mvImageMats.push_back(img);
     }
     ifs.close();
@@ -121,7 +128,7 @@ void ExtrinsicCalibrator::readImageFromFile(const std::string& imageFile)
         return;
     } else {
         std::cout << "Read " << mvImageRaws.size() << " files in the folder." << std::endl;
-        nTatalFrames = mvImageRaws.size();
+        setDataQuantity(mvImageRaws.size());    // set N
     }
 
     //! 注意不能直接对string排序
@@ -158,14 +165,14 @@ void ExtrinsicCalibrator::readOdomFromFile(const std::string& odomFile)
 
 void ExtrinsicCalibrator::dataSync()
 {
-    assert(nTatalFrames == mvImageRaws.size());
-    assert(nTatalFrames == mvvCorners.size());
-    assert(nTatalFrames < mvOdomRaws.size());
+    assert(N == mvImageRaws.size());
+    assert(N == mvvCorners.size());
+    assert(N <= mvOdomRaws.size());
     //    assert(mvTimeImage.)  // sorted?
 
     std::cout << "Syncing image data and odom data with timestamps..." << std::endl;
 
-    std::vector<OdomRaw> vOdomSynced(nTatalFrames);
+    std::vector<OdomRaw> vOdomSynced(N);
     int skipFrames = 0;
     for (int i = 0; i < mvTimeImage.size(); ++i) {
         auto r = std::upper_bound(mvTimeOdom.begin(), mvTimeOdom.end(), mvTimeImage[i]) -
@@ -202,34 +209,33 @@ void ExtrinsicCalibrator::dataSync()
 
 void ExtrinsicCalibrator::calculatePose()
 {
-
-//    mvPosesCamera.push_back(cv::Mat::eye(4, 4, CV_32F));
-    for (int i = 0; i < nTatalFrames; ++i) {
+    for (int j = 0; j < N; ++j) {
+        Mat rvec, tvec, R;
+#ifdef withHomograpy
         //! 通过Homograpy计算相机位姿. 参考OpenCV例子pose_from_homography.cpp
         //! [compute-image-points]
-        std::vector<cv::Point2f> imagePoints;
-        cv::undistortPoints(mvvCorners[i], imagePoints, K, D);
+        std::vector<Point2f> imagePoints;
+        undistortPoints(mvvCorners[j], imagePoints, K, D);
 
         //! [compute-object-points]
-        std::vector<cv::Point2f> objectPointsPlanar;
+        std::vector<Point2f> objectPointsPlanar;
         for (size_t i = 0; i < mvMapPoints.size(); i++) {
-            objectPointsPlanar.push_back(cv::Point2f(mvMapPoints[i].x, mvMapPoints[i].y));
+            objectPointsPlanar.push_back(Point2f(mvMapPoints[i].x, mvMapPoints[i].y));
         }
 
         //! [estimate-homography]
-        cv::Mat H = cv::findHomography(objectPointsPlanar, imagePoints);
+        Mat H = findHomography(objectPointsPlanar, imagePoints);
 
         //! [pose-from-homography]
         // Normalization to ensure that ||c1|| = 1
-        double norm =
-            sqrt(H.at<double>(0, 0) * H.at<double>(0, 0) + H.at<double>(1, 0) * H.at<double>(1, 0) +
-                 H.at<double>(2, 0) * H.at<double>(2, 0));
+        double norm = std::sqrt(H.at<double>(0, 0) * H.at<double>(0, 0) +
+                                H.at<double>(1, 0) * H.at<double>(1, 0) +
+                                H.at<double>(2, 0) * H.at<double>(2, 0));
         H /= norm;
-        cv::Mat c1 = H.col(0);
-        cv::Mat c2 = H.col(1);
-        cv::Mat c3 = c1.cross(c2);
-        cv::Mat tvec = H.col(2);
-        cv::Mat R(3, 3, CV_64F);
+        Mat c1 = H.col(0);
+        Mat c2 = H.col(1);
+        Mat c3 = c1.cross(c2);
+        tvec = H.col(2);
         for (int i = 0; i < 3; i++) {
             R.at<double>(i, 0) = c1.at<double>(i, 0);
             R.at<double>(i, 1) = c2.at<double>(i, 0);
@@ -237,101 +243,74 @@ void ExtrinsicCalibrator::calculatePose()
         }
 
         //! [polar-decomposition-of-the-rotation-matrix]
-        cv::Mat W, U, Vt;
-        cv::SVDecomp(R, W, U, Vt);
+        Mat W, U, Vt;
+        SVDecomp(R, W, U, Vt);
         R = U * Vt;
-
+        Rodrigues(R, rvec);
+#else
+        solvePnP(mvMapPoints, mvvCorners[j], K, D, rvec, tvec);
+        Rodrigues(rvec, R);
+#endif
         // 保存计算结果
-        cv::Mat Tcw = cv::Mat::eye(4, 4, CV_32F);
+        Mat Tcw = Mat::eye(4, 4, CV_32F);
         R.copyTo(Tcw.rowRange(0, 3).colRange(0, 3));
         tvec.copyTo(Tcw.rowRange(0, 3).col(3));
-
-        static cv::Mat Tc0 = Tcw;
-        cv::Mat Twc = Tc0 * cvu::inv(Tcw);
-        mvTwc.push_back(Twc);  // 存入Twc，平移部分即为其Pose
+        mvTcw.push_back(Tcw);
 
         // 相机位姿优化
-        cv::Mat Tcw_refined = optimize(Tcw, mvvCorners[i]);
-        mvTwc_refined.push_back(Tcw_refined);
-
+        Mat Tcw_refined = optimize(Tcw, mvvCorners[j]);
+        mvTcw_refined.push_back(Tcw_refined);
 
         //! 计算里程计位姿, w为首帧Odom的位姿，置为原点
-        static cv::Mat Tb0 = mvOdomRaws[0].toCvSE3();
-        cv::Mat Tbi = mvOdomRaws[i].toCvSE3();
-        cv::Mat Twb = Tbi * cvu::inv(Tb0);
-        mvTwb.push_back(Twb);
+        Mat Tbw = mvOdomRaws[j].toCvSE3();
+        mvTbw.push_back(Tbw);
 
-        // 位姿输出
+        // 可视化, 验证Tcw的准确性
         if (mbVerbose) {
-            cv::Mat tc = Twc.rowRange(0, 3).col(3);
-            cv::Mat tb = Twb.rowRange(0, 3).col(3);
-            cv::Mat tc_r = cv::Mat(Tc0 * cvu::inv(Tcw_refined)).rowRange(0, 3).col(3);
+            // 显示角点图与坐标轴, xyz对应rgb
+            Mat img_corners, img_pose, img_joint;
+            cvtColor(mvImageMats[j], img_corners, COLOR_GRAY2BGR);
+            cvtColor(mvImageMats[j], img_pose, COLOR_GRAY2BGR);
+            drawChessboardCorners(img_corners, mBoardSize, mvvCorners[j], 1);
+            circle(img_corners, mvvCorners[j][0], 8, Scalar(0, 0, 255), 2);
+            drawAxis(img_pose, mvMapPoints, K, D, R, tvec, 0.5 * mSquareSize);
+//            aruco::drawAxis(img_pose, K, D, rvec, tvec, 2 * mSquareSize);
+            hconcat(img_corners, img_pose, img_joint);
+            imshow("Chessboard corners and pose", img_joint);
 
-            std::cout << "[DEBUG] Odom Pose t = " << tb.t() << std::endl;
-            std::cout << "[DEBUG] Camera Pose t = " << tc.t() << std::endl;
-            std::cout << "[DEBUG] Camera Pose Refined t = " << tc_r.t() << std::endl;
-
-            // 显示角点图
-            cv::Mat img_corners, img_pose;
-            cv::cvtColor(mvImageMats[i], img_corners, cv::COLOR_GRAY2BGR);
-            cv::cvtColor(mvImageMats[i], img_pose, cv::COLOR_GRAY2BGR);
-            cv::drawChessboardCorners(img_corners, cv::Size(11, 8), mvvCorners[i], 1);
-            cv::imshow("Chessboard corners detection", img_corners);
-
-            // 显示坐标轴
-            cv::Mat rvec;
-            cv::Rodrigues(R, rvec);
-            cv::aruco::drawAxis(img_pose, K, D, rvec, tvec, 5 * 0.03);
-            cv::imshow("Pose from coplanar points", img_pose);
-
-            cv::waitKey(30);
+            waitKey(100);
         }
     }
+    setTransforms();
 }
 
-cv::Mat ExtrinsicCalibrator::computeH21(const std::vector<cv::Point2f>& vP1,
-                                        const std::vector<cv::Point2f>& vP2)
+// 计算Tcjci和Tbjbi,用于外参标定
+void ExtrinsicCalibrator::setTransforms()
 {
-    const int N = vP1.size();
-
-    cv::Mat A(2 * N, 9, CV_32F);  // 2N*9
-
-    for (int i = 0; i < N; i++) {
-        const float u1 = vP1[i].x;
-        const float v1 = vP1[i].y;
-        const float u2 = vP2[i].x;
-        const float v2 = vP2[i].y;
-
-        A.at<float>(2 * i, 0) = 0.0;
-        A.at<float>(2 * i, 1) = 0.0;
-        A.at<float>(2 * i, 2) = 0.0;
-        A.at<float>(2 * i, 3) = -u1;
-        A.at<float>(2 * i, 4) = -v1;
-        A.at<float>(2 * i, 5) = -1;
-        A.at<float>(2 * i, 6) = v2 * u1;
-        A.at<float>(2 * i, 7) = v2 * v1;
-        A.at<float>(2 * i, 8) = v2;
-
-        A.at<float>(2 * i + 1, 0) = u1;
-        A.at<float>(2 * i + 1, 1) = v1;
-        A.at<float>(2 * i + 1, 2) = 1;
-        A.at<float>(2 * i + 1, 3) = 0.0;
-        A.at<float>(2 * i + 1, 4) = 0.0;
-        A.at<float>(2 * i + 1, 5) = 0.0;
-        A.at<float>(2 * i + 1, 6) = -u2 * u1;
-        A.at<float>(2 * i + 1, 7) = -u2 * v1;
-        A.at<float>(2 * i + 1, 8) = -u2;
+    if (N == 0) {
+        assert(!mvTcw.empty());
+        assert(!mvTbw.empty());
+        assert(mvTbw.size() == mvTcw.size());
+        setDataQuantity(mvTcw.size());
+    } else {
+        assert(mvTcw.size() == N);
+        assert(mvTbw.size() == N);
     }
 
-    cv::Mat u, w, vt;
-
-    cv::SVDecomp(A, w, u, vt, cv::SVD::MODIFY_A | cv::SVD::FULL_UV);
-
-    return vt.row(8).reshape(0, 3);  // v的最后一列
+    mvTcjci.clear();
+    mvTbjbi.clear();
+    for (int j = 1; j < N; ++j) {
+        int i = j - 1;
+        Mat Tcjci = mvTcw[j] * cvu::inv(mvTcw[i]);
+        Mat Tbjbi = mvTbw[j] * cvu::inv(mvTbw[i]);
+        mvTcjci.push_back(Tcjci);
+        mvTbjbi.push_back(Tbjbi);   // 已验证
+    }
+    assert(mvTcjci.size() == N - 1);
+    assert(mvTbjbi.size() == N - 1);
 }
 
-cv::Mat ExtrinsicCalibrator::optimize(const cv::Mat& Tcw_,
-                                      const std::vector<cv::Point2f> vFeatures_)
+Mat ExtrinsicCalibrator::optimize(const Mat& Tcw_, const std::vector<Point2f> vFeatures_)
 {
     // 步骤1：构造g2o优化器
     g2o::SparseOptimizer optimizer;
@@ -357,7 +336,7 @@ cv::Mat ExtrinsicCalibrator::optimize(const cv::Mat& Tcw_,
 
     std::vector<g2o::EdgeProjectXYZ2UV*> vpEdgesMono;
     vpEdgesMono.reserve(nFeaturesPerFrame);
-    const float deltaMono = sqrt(5.991);
+    const float deltaMono = std::sqrt(5.991);
 
     // 步骤3：添加一元边：相机投影模型
     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
@@ -380,7 +359,7 @@ cv::Mat ExtrinsicCalibrator::optimize(const cv::Mat& Tcw_,
         e->setMeasurement(obs);
         e->setParameterId(0, 0);
         e->setInformation(Eigen::Matrix2d::Identity());
-        //        e->setRobustKernel(rk);
+//        e->setRobustKernel(rk);   //! NOTE 设置了鲁棒核函数后有错误
 
         optimizer.addEdge(e);
         vpEdgesMono.push_back(e);
@@ -394,70 +373,338 @@ cv::Mat ExtrinsicCalibrator::optimize(const cv::Mat& Tcw_,
 
     // 步骤4：返回优化后的位姿
     g2o::SE3Quat SE3quat_recov = vSE3->estimate();
-    cv::Mat Tcw_refined = ug2o::toCvMat(SE3quat_recov);
+    Mat Tcw_refined = ug2o::toCvMat(SE3quat_recov);
 
     return Tcw_refined;
 }
 
-
-void ExtrinsicCalibrator::showChessboardCorners()
+bool ExtrinsicCalibrator::checkSystemReady()
 {
-    if (!mbVerbose)
-        return;
-    for (int i = 0; i < nTatalFrames; ++i) {
-        cv::Mat imageOut;
-        // 画角点
-        cv::cvtColor(mvImageMats[i], imageOut, cv::COLOR_GRAY2BGR);
-        cv::drawChessboardCorners(imageOut, mBoardSize, cv::Mat(mvvCorners[i]), 1);
+    if (!K.data || !D.data)
+        return false;
+//    if (mvTcw.empty() || mvTbw.empty() )
+//        return false;
+    if (mvTcjci.empty() || mvTbjbi.empty())
+        return false;
+    if ((mvTcjci.size() != N - 1 ) || (mvTbjbi.size() != N - 1))
+        return false;
 
-        //        // 画坐标轴
-        //        Eigen::Matrix3d Rcw;
-        //        Eigen::Vector3d tcw;
-        //        cv::cv2eigen(rotation, Rcw);
-        //        cv::cv2eigen(cv_t, tcw);
-        //        std::vector<Eigen::Vector3d> axis;
-        //        axis.push_back(Rcw * Eigen::Vector3d(0, 0, 0) + tcw);
-        //        axis.push_back(Rcw * Eigen::Vector3d(0.5, 0, 0) + tcw);
-        //        axis.push_back(Rcw * Eigen::Vector3d(0, 0.5, 0) + tcw);
-        //        axis.push_back(Rcw * Eigen::Vector3d(0, 0, 0.5) + tcw);
-        //        std::vector<Eigen::Vector2d> imgpts(4);
-        //        for (int i = 0; i < 4; ++i) {
-        //            cam->spaceToPlane(axis[i], imgpts[i]);
-        //        }
-        //        cv::line(imageOut, cv::Point2f(imgpts[0](0), imgpts[0](1)),
-        //                 cv::Point2f(imgpts[1](0), imgpts[1](1)), cv::Scalar(255, 0, 0), 2);  //
-        //                 BGR
-        //        cv::line(imageOut, cv::Point2f(imgpts[0](0), imgpts[0](1)),
-        //                 cv::Point2f(imgpts[2](0), imgpts[2](1)), cv::Scalar(0, 255, 0), 2);
-        //        cv::line(imageOut, cv::Point2f(imgpts[0](0), imgpts[0](1)),
-        //                 cv::Point2f(imgpts[3](0), imgpts[3](1)), cv::Scalar(0, 0, 255), 2);
+    return true;
+}
 
-        //        cv::imshow("Current Image Corners", imageOut);
-        //        cv::waitKey(50);
+bool ExtrinsicCalibrator::estimatePitchRoll(Eigen::Matrix3d& Rbc_yx)
+{
+    if (!checkSystemReady())
+        return false;
+
+    Eigen::MatrixXd M((N - 1) * 4, 4);
+    M.setZero();
+
+    size_t mark = 0;
+    for (size_t i = 0; i < N - 1; ++i) {
+        const Eigen::Vector3d& rvec_cam = cvu::getAngleAxisFromCvMat(mvTcjci[i]);
+        const Eigen::Vector3d& rvec_odo = cvu::getAngleAxisFromCvMat(mvTbjbi[i]);
+
+        // Remove zero rotation.
+        if (rvec_cam.norm() == 0 || rvec_odo.norm() == 0) {
+            std::cout << "[Warning] A zero rotation occurred!" << std::endl;
+            continue;
+        }
+
+        Eigen::Quaterniond q_cam;
+        q_cam = Eigen::AngleAxisd(rvec_cam.norm(), rvec_cam.normalized());
+        Eigen::Quaterniond q_odo;
+        q_odo = Eigen::AngleAxisd(rvec_odo.norm(), rvec_odo.normalized());
+
+        M.block<4, 4>(mark * 4, 0) = cvu::QuaternionMultMatLeft(q_odo) - cvu::QuaternionMultMatRight(q_cam);
+        mark++;
     }
-    cv::destroyAllWindows();
+
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(M, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    // 取出V_4X4的最后两列
+    Eigen::Vector4d t1 = svd.matrixV().block<4, 1>(0, 2);
+    Eigen::Vector4d t2 = svd.matrixV().block<4, 1>(0, 3);
+    std::cout << "Sigular values of M: " << svd.singularValues().transpose() << std::endl;
+
+    // solve constraint for q_yz: xy = -zw
+    double x[2];
+    if (!solveQuadraticEquation(t1(0) * t1(1) + t1(2) * t1(3),
+                                t1(0) * t2(1) + t1(1) * t2(0) + t1(2) * t2(3) + t1(3) * t2(2),
+                                t2(0) * t2(1) + t2(2) * t2(3), x[0], x[1])) {
+        std::cerr << "# ERROR: Quadratic equation cannot be solved due to negative determinant."
+                  << std::endl;
+        return false;
+    }
+
+    Eigen::Matrix3d R_yxs[2];
+    double yaw[2];
+
+    for (int i = 0; i < 2; ++i) {
+        double t = x[i] * x[i] * t1.dot(t1) + 2 * x[i] * t1.dot(t2) + t2.dot(t2);
+
+        // solve constraint ||q_yx|| = 1.
+        double b = std::sqrt(1.0 / t);
+        double a = x[i] * b;
+
+        Eigen::Quaterniond q_yx;
+        q_yx.coeffs() = a * t1 + b * t2;    // a,b为scale
+        R_yxs[i] = q_yx.toRotationMatrix();
+
+        double r, p;
+        cvu::EigenMat2RPY(R_yxs[i], r, p, yaw[i]);
+    }
+    printf("the 2 Yaws: %f, %f\n", yaw[0], yaw[1]);
+    if (fabs(yaw[0]) < fabs(yaw[1]))
+        Rbc_yx = R_yxs[0];
+    else
+        Rbc_yx = R_yxs[1];
+
+    return true;
+}
+
+// 解一元二次方程的两个根
+bool ExtrinsicCalibrator::solveQuadraticEquation(double a, double b, double c, double& x1,
+                                               double& x2) const
+{
+    if (fabs(a) < 1e-12) {
+        x1 = x2 = -c / b;
+        return true;
+    }
+    double delta2 = b * b - 4.0 * a * c;
+
+    if (delta2 < 0.0) {
+        return false;
+    }
+
+    double delta = std::sqrt(delta2);
+
+    x1 = (-b + delta) / (2.0 * a);
+    x2 = (-b - delta) / (2.0 * a);
+
+    return true;
+}
+
+bool ExtrinsicCalibrator::estimate(Eigen::Matrix4d &H_cam_odo, std::vector<double> &scales)
+{
+    if (!checkSystemReady())
+        return false;
+
+    // Estimate Rbc_yx first
+    Eigen::Matrix3d R_yx;
+    estimatePitchRoll(R_yx);
+
+    int segmentCount = 1;
+    int motionCount = N - 1;
+//    for (int segmentId = 0; segmentId < segmentCount; ++segmentId) {
+//        motionCount += rvecs1.at(segmentId).size();
+//    }
+
+    Eigen::MatrixXd G = Eigen::MatrixXd::Zero(motionCount * 2, 2 + segmentCount * 2);
+    Eigen::MatrixXd w = Eigen::MatrixXd::Zero(motionCount * 2, 1);
+
+    int mark = 0;
+    for (int segmentId = 0; segmentId < segmentCount; ++segmentId) {
+        for (size_t motionId = 0; motionId < motionCount; ++motionId) {
+            const Eigen::Vector3d& rvec1 = cvu::getAngleAxisFromCvMat(mvTbjbi[motionId]);
+            const Eigen::Vector3d& tvec1 = cvu::getTranslationFromCvMat(mvTbjbi[motionId]);
+            const Eigen::Vector3d& rvec2 = cvu::getAngleAxisFromCvMat(mvTcjci[motionId]);
+            const Eigen::Vector3d& tvec2 = cvu::getTranslationFromCvMat(mvTcjci[motionId]);
+
+//            const Eigen::Vector3d& rvec1 = rvecs1.at(segmentId).at(motionId);
+//            const Eigen::Vector3d& tvec1 = tvecs1.at(segmentId).at(motionId);
+//            const Eigen::Vector3d& rvec2 = rvecs2.at(segmentId).at(motionId);
+//            const Eigen::Vector3d& tvec2 = tvecs2.at(segmentId).at(motionId);
+
+            // Remove zero rotation.
+            if (rvec1.norm() < 1e-10 || rvec2.norm() < 1e-10) {
+                ++mark;
+                continue;
+            }
+
+            Eigen::Quaterniond q1;
+            q1 = Eigen::AngleAxisd(rvec1.norm(), rvec1.normalized());
+
+            Eigen::Matrix2d J;
+            J = q1.toRotationMatrix().block<2, 2>(0, 0) - Eigen::Matrix2d::Identity();
+
+            // project tvec2 to plane with normal defined by 3rd row of R_yx
+            Eigen::Vector3d n;
+            n = R_yx.row(2);
+
+            Eigen::Vector3d pi = R_yx * (tvec2 - tvec2.dot(n) * n);
+
+            Eigen::Matrix2d K;
+            K << pi(0), -pi(1), pi(1), pi(0);
+
+            G.block<2, 2>(mark * 2, 0) = J;
+            G.block<2, 2>(mark * 2, 2 + segmentId * 2) = K;
+
+            w.block<2, 1>(mark * 2, 0) = tvec1.block<2, 1>(0, 0);
+
+            ++mark;
+        }
+    }
+
+    Eigen::MatrixXd m(2 + segmentCount * 2, 1);
+    m = G.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(w);
+
+    Eigen::Vector2d t(-m(0), -m(1));
+
+    std::vector<double> alpha_hypos;
+    for (int segmentId = 0; segmentId < segmentCount; ++segmentId) {
+        double alpha = atan2(m(2 + segmentId * 2 + 1), m(2 + segmentId * 2));
+        double scale = m.block<2, 1>(2 + segmentId * 2, 0).norm();
+
+        alpha_hypos.push_back(alpha);
+        scales.push_back(scale);
+    }
+
+    double errorMin = std::numeric_limits<double>::max();
+    double alpha_best = 0.0;
+
+    for (size_t i = 0; i < alpha_hypos.size(); ++i) {
+        double error = 0.0;
+        double alpha = alpha_hypos.at(i);
+
+        for (int segmentId = 0; segmentId < segmentCount; ++segmentId) {
+            for (size_t motionId = 0; motionId < motionCount; ++motionId) {
+                const Eigen::Vector3d& rvec1 = cvu::getAngleAxisFromCvMat(mvTbjbi[motionId]);
+                const Eigen::Vector3d& tvec1 = cvu::getTranslationFromCvMat(mvTbjbi[motionId]);
+                const Eigen::Vector3d& rvec2 = cvu::getAngleAxisFromCvMat(mvTcjci[motionId]);
+                const Eigen::Vector3d& tvec2 = cvu::getTranslationFromCvMat(mvTcjci[motionId]);
+
+//                const Eigen::Vector3d& rvec1 = rvecs1.at(segmentId).at(motionId);
+//                const Eigen::Vector3d& tvec1 = tvecs1.at(segmentId).at(motionId);
+//                const Eigen::Vector3d& rvec2 = rvecs2.at(segmentId).at(motionId);
+//                const Eigen::Vector3d& tvec2 = tvecs2.at(segmentId).at(motionId);
+
+                Eigen::Quaterniond q1;
+                q1 = Eigen::AngleAxisd(rvec1.norm(), rvec1.normalized());
+
+                Eigen::Matrix3d N;
+                N = q1.toRotationMatrix() - Eigen::Matrix3d::Identity();
+
+                Eigen::Matrix3d R = Eigen::AngleAxisd(alpha, Eigen::Vector3d::UnitZ()) * R_yx;
+
+                // project tvec2 to plane with normal defined by 3rd row of R
+                Eigen::Vector3d n;
+                n = R.row(2);
+
+                Eigen::Vector3d pc = tvec2 - tvec2.dot(n) * n;
+                //                    Eigen::Vector3d pc = tvec2;
+
+                Eigen::Vector3d A = R * pc;
+                Eigen::Vector3d b = N * (Eigen::Vector3d() << t, 0.0).finished() + tvec1;
+
+                error += (A * scales.at(segmentId) - b).norm();
+            }
+        }
+
+        if (error < errorMin) {
+            errorMin = error;
+            alpha_best = alpha;
+        }
+    }
+
+    H_cam_odo.setIdentity();
+    H_cam_odo.block<3, 3>(0, 0) = Eigen::AngleAxisd(alpha_best, Eigen::Vector3d::UnitZ()) * R_yx;
+    H_cam_odo.block<2, 1>(0, 3) = t;
+
+    if (mbVerbose) {
+        std::cout << "# INFO: Before refinement:" << std::endl;
+        std::cout << "H_cam_odo = " << std::endl;
+        std::cout << H_cam_odo << std::endl;
+        std::cout << "scales = ";
+        for (size_t i = 0; i < scales.size(); ++i) {
+            std::cout << scales.at(i) << " ";
+        }
+        std::cout << std::endl;
+    }
+
+//    refineEstimate(H_cam_odo, scales);
+
+//    if (mbVerbose) {
+//        std::cout << "# INFO: After refinement:" << std::endl;
+//        std::cout << "H_cam_odo = " << std::endl;
+//        std::cout << H_cam_odo << std::endl;
+//        std::cout << "scales = " << std::endl;
+//        for (size_t i = 0; i < scales.size(); ++i) {
+//            std::cout << scales.at(i) << " ";
+//        }
+//        std::cout << std::endl;
+//    }
+
+    return true;
 }
 
 void ExtrinsicCalibrator::writePose(const std::string& outputFile)
 {
+    if (mvTcw_refined.empty())
+        mvTcw_refined = mvTcw;
+
+    Mat Tc0w = mvTcw[0];
+    Mat Tb0w = mvTbw[0];
+    Mat Tc0w_r = mvTcw_refined[0];
+    for (int i = 0; i < N; ++i) {
+        Mat Tcic0 = mvTcw[i] * cvu::inv(Tc0w);   // Tc0ci = Twci, 以首帧坐标系为原点, 可视化用
+        mvPoseCam.push_back(Tcic0);           // 存入Twc，平移部分即为其Pose
+
+        Mat Tbib0 = mvTbw[i] * cvu::inv(Tb0w);
+        mvPoseOdo.push_back(Tbib0);
+
+        Mat Tcic0_r = Tc0w_r * cvu::inv(mvTcw_refined[i]);
+        mvPoseCam_refined.push_back(Tcic0_r);
+    }
+
     std::ofstream ofs(outputFile);
     if (!ofs.is_open()) {
         std::cerr << "File open error! : " << outputFile << std::endl;
         return;
     }
-    for (int i = 0; i < nTatalFrames; ++i) {
-        cv::Mat Twci = mvTwc[i].rowRange(0, 3).col(3);
-        cv::Mat Twbi = mvTwb[i].rowRange(0, 3).col(3);
-        cv::Mat Twcr = mvTwc_refined[i].rowRange(0, 3).col(3);
-        //        std::cout << "#" << i << " Twc: " << Twci.t() << " , Twb: " << Twbi.t() <<
-        //        std::endl;
-        ofs << Twbi.at<float>(0) << " " << Twbi.at<float>(1) << " " << Twbi.at<float>(2) << " "
-            << Twci.at<float>(0) << " " << Twci.at<float>(1) << " " << Twci.at<float>(2) << " "
-            << Twcr.at<float>(0) << " " << Twcr.at<float>(1) << " " << Twcr.at<float>(2)
+    for (int i = 0; i < N; ++i) {
+        Mat Tcic0 = mvPoseCam[i].rowRange(0, 3).col(3);
+        Mat Tbib0 = mvPoseOdo[i].rowRange(0, 3).col(3);
+        Mat Tcic0_r = mvPoseCam_refined[i].rowRange(0, 3).col(3);
+//        if (mbVerbose) {
+//            std::cout << "[DEBUG] Odom Pose t = " << Twbi.t() << std::endl;
+//            std::cout << "[DEBUG] Camera Pose t = " << Twci.t() << std::endl;
+//            std::cout << "[DEBUG] Camera Pose Refined t = " << Twcr.t() << std::endl;
+//        }
+
+        ofs << Tbib0.at<float>(0) << " " << Tbib0.at<float>(1) << " " << Tbib0.at<float>(2) << " "
+            << Tcic0.at<float>(0) << " " << Tcic0.at<float>(1) << " " << Tcic0.at<float>(2) << " "
+            << Tcic0_r.at<float>(0) << " " << Tcic0_r.at<float>(1) << " " << Tcic0_r.at<float>(2)
             << std::endl;
     }
     ofs.close();
     std::cout << "Trajectories saved to " << outputFile << std::endl;
+}
+
+void ExtrinsicCalibrator::drawAxis(Mat& image, const std::vector<Point3f>& MPs, const Mat& K,
+                                   const Mat& D, const Mat& R, const Mat& t, const float &len)
+{
+    Matrix3d Rcw;
+    Vector3d tcw;
+    Matrix3d K_cv;
+    cv::cv2eigen(R, Rcw);
+    cv::cv2eigen(t, tcw);
+    cv::cv2eigen(K, K_cv);
+    for (const auto& mp : MPs) {
+        std::vector<Vector3d> axis;
+        axis.push_back(Rcw * Vector3d(mp.x, mp.y, mp.z) + tcw);
+        axis.push_back(Rcw * Vector3d(mp.x + len, mp.y, mp.z) + tcw);
+        axis.push_back(Rcw * Vector3d(mp.x, mp.y + len, mp.z) + tcw);
+        axis.push_back(Rcw * Vector3d(mp.x, mp.y, mp.z + len) + tcw);
+        std::vector<cv::Point2f> imgpts(4);
+        for (int i = 0; i < 4; ++i) {
+            cvu::spaceToPlane(axis[i], imgpts[i], K_cv);
+        }
+        // projectPoints(axis, cv_r, cv_t, K, dist, imgpts);
+        cv::line(image, imgpts[0], imgpts[1], Scalar(0, 0, 255), 2);  // xyz-RGB
+        cv::line(image, imgpts[0], imgpts[2], Scalar(0, 255, 0), 2);
+        cv::line(image, imgpts[0], imgpts[3], Scalar(255, 0, 0), 2);
+    }
 }
 
 }  // namespace ec

@@ -2,3 +2,4 @@ build/*
 lib/*
 bin/*
 *user
+odom_camera_ex_rotation*

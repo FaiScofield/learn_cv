@@ -26,9 +26,17 @@ target_link_libraries(calibrateWithChessboard
 #    ${Boost_LIBRARIES}
 #)
 
-#add_executable(extrinsicCalibrateBetweenCameraOdom extrinsicCalibrateBetweenCameraOdom.cpp)
-#target_link_libraries(extrinsicCalibrateBetweenCameraOdom
-#    learnCV
-#    ${OpenCV_LIBS}
-#    ${Boost_LIBRARIES}
-#    )
+
+add_executable(extrinsicCalibrateBetweenCameraOdom extrinsicCalibrateBetweenCameraOdom.cpp)
+target_link_libraries(extrinsicCalibrateBetweenCameraOdom
+    learnCV
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+)
+
+add_executable(extrinsicCalibrateSimulation extrinsicCalibrateSimulation.cpp)
+target_link_libraries(extrinsicCalibrateSimulation
+    learnCV
+    ${OpenCV_LIBS}
+    ${Boost_LIBRARIES}
+)

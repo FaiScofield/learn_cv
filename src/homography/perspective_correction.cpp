@@ -1,11 +1,11 @@
 #include <iostream>
 #include <opencv2/opencv_modules.hpp>
 #ifdef HAVE_OPENCV_ARUCO
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/calib3d.hpp>
-#include <opencv2/highgui.hpp>
 #include <opencv2/aruco.hpp>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 
 using namespace std;
 using namespace cv;
@@ -14,13 +14,14 @@ namespace
 {
 enum Pattern { CHESSBOARD, CIRCLES_GRID, ASYMMETRIC_CIRCLES_GRID };
 
-Scalar randomColor( RNG& rng )
+Scalar randomColor(RNG& rng)
 {
-  int icolor = (unsigned int) rng;
-  return Scalar( icolor & 255, (icolor >> 8) & 255, (icolor >> 16) & 255 );
+    int icolor = (unsigned int)rng;
+    return Scalar(icolor & 255, (icolor >> 8) & 255, (icolor >> 16) & 255);
 }
 
-void perspectiveCorrection(const string &img1Path, const string &img2Path, const Size &patternSize, RNG &rng)
+void perspectiveCorrection(const string& img1Path, const string& img2Path, const Size& patternSize,
+                           RNG& rng)
 {
     Mat img1 = imread(img1Path);
     Mat img2 = imread(img2Path);
@@ -31,8 +32,7 @@ void perspectiveCorrection(const string &img1Path, const string &img2Path, const
     bool found2 = findChessboardCorners(img2, patternSize, corners2);
     //! [find-corners]
 
-    if (!found1 || !found2)
-    {
+    if (!found1 || !found2) {
         cout << "Error, cannot find the chessboard corners in both images." << endl;
         return;
     }
@@ -54,13 +54,12 @@ void perspectiveCorrection(const string &img1Path, const string &img2Path, const
     //! [compute-transformed-corners]
     Mat img_draw_matches;
     hconcat(img1, img2, img_draw_matches);
-    for (size_t i = 0; i < corners1.size(); i++)
-    {
-        Mat pt1 = (Mat_<double>(3,1) << corners1[i].x, corners1[i].y, 1);
+    for (size_t i = 0; i < corners1.size(); i++) {
+        Mat pt1 = (Mat_<double>(3, 1) << corners1[i].x, corners1[i].y, 1);
         Mat pt2 = H * pt1;
         pt2 /= pt2.at<double>(2);
 
-        Point end( (int) (img1.cols + pt2.at<double>(0)), (int) pt2.at<double>(1) );
+        Point end((int)(img1.cols + pt2.at<double>(0)), (int)pt2.at<double>(1));
         line(img_draw_matches, corners1[i], end, randomColor(rng), 2);
     }
 
@@ -69,38 +68,37 @@ void perspectiveCorrection(const string &img1Path, const string &img2Path, const
     //! [compute-transformed-corners]
 }
 
-const char* params
-    = "{ help h         |       | print usage }"
-      "{ image1         | ../data/left02.jpg | path to the source chessboard image }"
-      "{ image2         | ../data/left01.jpg | path to the desired chessboard image }"
-      "{ width bw       | 9     | chessboard width }"
-      "{ height bh      | 6     | chessboard height }";
+const char* params =
+    "{ help h         |       | print usage }"
+    "{ image1         | ../data/left02.jpg | path to the source chessboard image }"
+    "{ image2         | ../data/left01.jpg | path to the desired chessboard image }"
+    "{ width bw       | 9     | chessboard width }"
+    "{ height bh      | 6     | chessboard height }";
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
-    cv::RNG rng( 0xFFFFFFFF );
+    cv::RNG rng(0xFFFFFFFF);
     CommandLineParser parser(argc, argv, params);
 
-    if (parser.has("help"))
-    {
+    if (parser.has("help")) {
         parser.about("Code for homography tutorial.\n"
-            "Example 2: perspective correction.\n");
+                     "Example 2: perspective correction.\n");
         parser.printMessage();
         return 0;
     }
 
     Size patternSize(parser.get<int>("width"), parser.get<int>("height"));
-    perspectiveCorrection(parser.get<String>("image1"),
-                          parser.get<String>("image2"),
-                          patternSize, rng);
+    perspectiveCorrection(parser.get<String>("image1"), parser.get<String>("image2"), patternSize,
+                          rng);
 
     return 0;
 }
 #else
 int main()
 {
-    std::cerr << "FATAL ERROR: This sample requires opencv_aruco module (from opencv_contrib)" << std::endl;
+    std::cerr << "FATAL ERROR: This sample requires opencv_aruco module (from opencv_contrib)"
+              << std::endl;
     return 0;
 }
 #endif

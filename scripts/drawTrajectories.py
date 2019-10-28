@@ -42,8 +42,8 @@ if __name__=='__main__':
 
     fig = plt.figure()
     ax1 = plt.axes(projection='3d')
-    ax1.scatter3D(xo, yo, zo, cmap='Blues')  # 绘制散点图
-    ax1.plot3D(xc, yc, zc, 'green')    # 绘制空间曲线
+    ax1.plot3D(xo, yo, zo, 'black')
+    ax1.plot3D(xc, yc, zc, 'green')
     ax1.plot3D(xcr, ycr, zcr, 'red')
     plt.show()
 

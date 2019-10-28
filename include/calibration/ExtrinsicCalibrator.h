@@ -17,32 +17,39 @@
 namespace ec
 {
 
-
 class ExtrinsicCalibrator
 {
 public:
     ExtrinsicCalibrator();
     ~ExtrinsicCalibrator();
 
+    bool lessThen(const ImageRaw& r1, const ImageRaw& r2) { return r1.timestamp < r2.timestamp; }
     void setVerbose(bool flag) { mbVerbose = flag; }
+    void addCameraPose(cv::Mat Tcw) { mvTcw.emplace_back(Tcw); }
+    void addOdomPose(cv::Mat Tbw) { mvTbw.emplace_back(Tbw); }
+    cv::Mat getOdomPose(unsigned int idx) { return mvTbw[idx]; }
 
-    void readCornersFromFile(const std::string& cornerFile);
+    void readCornersFromFile_Matlab(const std::string& cornerFile);
     void readImageFromFile(const std::string& imageFile);
     void readOdomFromFile(const std::string& odomFile);
     void dataSync();
+    void setDataQuantity(unsigned int n) { N = n; }
+    bool checkSystemReady();
 
     void calculatePose();
-    int checkHomograpy(const cv::Mat& H, const std::vector<cv::Mat>& Rs, const std::vector<cv::Mat>& ts);
-    cv::Mat computeH21(const std::vector<cv::Point2f>& vP1, const std::vector<cv::Point2f>& vP2);
+    void setTransforms();
     cv::Mat optimize(const cv::Mat& Tcw_, const std::vector<cv::Point2f> vFeatures_);
+    bool solveQuadraticEquation(double a, double b, double c, double& x1, double& x2) const;
+    bool estimatePitchRoll(Eigen::Matrix3d& R_yx);
+    bool estimate(Eigen::Matrix4d& H_cam_odo, std::vector<double>& scales);
 
-    bool lessThen(const ImageRaw& r1, const ImageRaw& r2) { return r1.timestamp < r2.timestamp; }
 
-    void showChessboardCorners();
+    void drawAxis(cv::Mat& image, const std::vector<cv::Point3f>& MPs, const cv::Mat& K,
+                  const cv::Mat& D, const cv::Mat& R, const cv::Mat& tvec, const float& len);
     void writePose(const std::string& outputFile);
 
 private:
-    unsigned int nTatalFrames;
+    unsigned int N = 0;
     unsigned int nFeaturesPerFrame = 88;
     std::vector<OdomRaw> mvOdomRaws;
     std::vector<ImageRaw> mvImageRaws;
@@ -52,22 +59,31 @@ private:
     std::vector<long long int> mvTimeImage;
     std::vector<cv::Mat> mvImageMats;
 
-    std::vector<cv::Mat> mvTwc;
-    std::vector<cv::Mat> mvTwb;
-    std::vector<cv::Mat> mvTwc_refined;
+    std::vector<cv::Mat> mvTbw;
+    std::vector<cv::Mat> mvTcw;
+    std::vector<cv::Mat> mvTcw_refined;
+
+    std::vector<cv::Mat> mvTcjci;
+    std::vector<cv::Mat> mvTbjbi;
+
+    std::vector<cv::Mat> mvPoseCam;
+    std::vector<cv::Mat> mvPoseOdo;
+    std::vector<cv::Mat> mvPoseCam_refined;
+
     std::vector<cv::Mat> mvPosesCamera;
     std::vector<g2o::VertexSE3> mvVertexPoseCamera;
     std::vector<g2o::VertexSE2> mvVertexPoseOdom;
 
     cv::Mat K, D;
-    cv::Mat R, t;
     cv::Size mBoardSize;
+    float mSquareSize;
     //    Eigen::Matrix3f R;
     //    Eigen::Vector3f t;
 
     double fx, fy;
     double cx, cy;
     bool mbVerbose = false;
+    bool mbSystemReady = false;
 };
 
 double normalizeAngle(const double angle)

@@ -8,30 +8,31 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wno-old-style-cast -Wno-depr
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer")
 
-set(OpenCV_DIR /home/vance/opt/opencv-3.4.1/build)
-find_package(OpenCV 3 REQUIRED)
 find_package(Boost COMPONENTS filesystem  REQUIRED)
 find_package(Eigen REQUIRED)
-
-#set(G2O_ROOT /home/vance/opt/g2o-20160424/install)
-find_package(G2O REQUIRED)
 find_package(CSparse REQUIRED)
 find_package(Cholmod REQUIRED)
-#file(GLOB G2O_LIBS /home/vance/opt/g2o-20160424/install/lib/*.so)
-list(APPEND G2O_LIBS
-    cxsparse cholmod g2o_core g2o_stuff g2o_types_sba g2o_csparse_extension
-)
+#find_package(Sophus REQUIRED)
 
-if(G2O_FOUND)
-    message(STATUS "        G2O Root:    ${G2O_ROOT}")
-    message(STATUS "        G2O Include: ${G2O_INCLUDE_DIR}")
-    message(STATUS "        G2O Library: ${G2O_LIBS}")
-endif(G2O_FOUND)
+set(OpenCV_DIR /home/vance/opt/opencv-3.4.1/build)
+find_package(OpenCV 3 REQUIRED)
 if(OpenCV_FOUND)
     message(STATUS "        OpenCV Version: ${OpenCV_VERSION}")
     message(STATUS "        OpenCV Include: ${OpenCV_INCLUDE_DIRS}")
     message(STATUS "        OpenCV Library: ${OpenCV_LIBS}")
 endif(OpenCV_FOUND)
+
+set(G2O_ROOT /home/vance/opt/g2o-20160424/install)
+find_package(G2O REQUIRED)
+file(GLOB G2O_LIBS /home/vance/opt/g2o-20160424/install/lib/*.so)
+list(APPEND G2O_LIBS
+    cxsparse cholmod
+)
+if(G2O_FOUND)
+    message(STATUS "        G2O Root:    ${G2O_ROOT}")
+    message(STATUS "        G2O Include: ${G2O_INCLUDE_DIR}")
+    message(STATUS "        G2O Library: ${G2O_LIBS}")
+endif(G2O_FOUND)
 
 
 include_directories(
@@ -44,6 +45,7 @@ include_directories(
     ${CSPARSE_INCLUDE_DIR}
     ${Cholmod_INCLUDE_DIR}
     ${G2O_INCLUDE_DIR}
+#    ${Sophus_INCLUDE_DIRS}
 )
 
 
